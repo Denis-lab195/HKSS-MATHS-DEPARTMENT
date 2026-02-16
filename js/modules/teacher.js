@@ -577,6 +577,296 @@ const TeacherDashboard = (function() {
         }
         return true;
     }
+    // ============= TEACHER CAT ANALYTICS =============
+
+async function teacherViewCATAnalytics() {
+    try {
+        const currentUser = Auth.getCurrentUser();
+        if (!currentUser || currentUser.type !== 'teacher') return;
+        
+        UIManager.showSection('teacher-cat-analytics-section');
+        
+        // Show loading
+        document.getElementById('teacher-cat-top10-body').innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border text-maroon" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+        document.getElementById('teacher-cat-bottom10-body').innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border text-maroon" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+        document.getElementById('teacher-cat-summary-body').innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border text-maroon" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+        
+        // Load weeks for selector
+        const weeksSnap = await db.collection('weeks').orderBy('term').orderBy('weekNumber').get();
+        
+        let weekOptions = '<option value="all">All CATs (Overall)</option>';
+        const weekMap = {};
+        
+        weeksSnap.forEach(doc => {
+            const week = doc.data();
+            weekMap[doc.id] = {
+                term: week.term,
+                weekNumber: week.weekNumber
+            };
+            weekOptions += `<option value="${doc.id}">Term ${week.term} Week ${week.weekNumber}</option>`;
+        });
+        
+        const weekSelect = document.getElementById('teacher-catWeekSelect');
+        if (weekSelect) {
+            weekSelect.innerHTML = weekOptions;
+        }
+        
+        // Load default view (all weeks)
+        await loadTeacherCATAnalytics('all');
+        
+    } catch (error) {
+        console.error('Error in teacher CAT analytics:', error);
+        Swal.fire('Error', 'Failed to load CAT analytics', 'error');
+    }
+}
+
+async function loadTeacherCATAnalytics(weekId = 'all') {
+    try {
+        const currentUser = Auth.getCurrentUser();
+        if (!currentUser) return;
+        
+        const teacherClass = currentUser.assignedClass;
+        
+        // Update title
+        const weekTitle = document.getElementById('teacher-cat-week-title');
+        if (weekTitle) {
+            if (weekId === 'all') {
+                weekTitle.textContent = `All CATs - ${teacherClass} Class`;
+            } else {
+                const weekDoc = await db.collection('weeks').doc(weekId).get();
+                if (weekDoc.exists) {
+                    const week = weekDoc.data();
+                    weekTitle.textContent = `Term ${week.term} Week ${week.weekNumber} - ${teacherClass} Class`;
+                }
+            }
+        }
+        
+        // Fetch data
+        const [studentsSnap, marksSnap] = await Promise.all([
+            db.collection('students').where('form', '==', teacherClass).get(),
+            db.collection('marks').get()
+        ]);
+        
+        // Create student map for teacher's class only
+        const myStudents = {};
+        studentsSnap.forEach(doc => {
+            myStudents[doc.id] = {
+                name: doc.data().name,
+                admNo: doc.data().admNo
+            };
+        });
+        
+        // Process marks for teacher's class
+        const weekData = {};
+        const overallData = {};
+        
+        marksSnap.forEach(doc => {
+            const data = doc.data();
+            const studentId = data.studentId;
+            
+            // Only include students from teacher's class
+            if (!myStudents[studentId]) return;
+            
+            const student = myStudents[studentId];
+            
+            // Filter by week if specified
+            if (weekId !== 'all' && data.weekId !== weekId) return;
+            
+            // Week specific
+            if (!weekData[data.weekId]) {
+                weekData[data.weekId] = [];
+            }
+            weekData[data.weekId].push({
+                studentId: studentId,
+                name: student.name,
+                admNo: student.admNo,
+                marks: data.marks
+            });
+            
+            // Overall
+            if (!overallData[studentId]) {
+                overallData[studentId] = {
+                    name: student.name,
+                    admNo: student.admNo,
+                    total: 0,
+                    count: 0,
+                    marks: []
+                };
+            }
+            overallData[studentId].total += data.marks;
+            overallData[studentId].count++;
+            overallData[studentId].marks.push(data.marks);
+        });
+        
+        if (weekId === 'all') {
+            // Show overall for teacher's class
+            await displayTeacherOverallCATAnalytics(overallData, teacherClass);
+        } else {
+            // Show specific week for teacher's class
+            await displayTeacherWeekCATAnalytics(weekData[weekId] || [], weekId, teacherClass);
+        }
+        
+    } catch (error) {
+        console.error('Error loading teacher CAT analytics:', error);
+        Swal.fire('Error', 'Failed to load data', 'error');
+    }
+}
+
+async function displayTeacherOverallCATAnalytics(overallData, teacherClass) {
+    // Build rankings
+    const rankings = [];
+    for (let id in overallData) {
+        const s = overallData[id];
+        rankings.push({
+            name: s.name,
+            admNo: s.admNo,
+            average: s.total / s.count,
+            highest: Math.max(...s.marks),
+            lowest: Math.min(...s.marks),
+            assessments: s.count
+        });
+    }
+    
+    rankings.sort((a, b) => b.average - a.average);
+    
+    // Display Top 10 in class
+    let topHtml = '';
+    rankings.slice(0, 10).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+        topHtml += `<tr>
+            <td><strong>${medal || i+1}</strong></td>
+            <td>${s.name}</td>
+            <td>${s.admNo}</td>
+            <td><span class="badge bg-success">${s.average.toFixed(1)}%</span></td>
+            <td>${s.highest}%</td>
+            <td>${s.lowest}%</td>
+            <td>${s.assessments}</td>
+        </tr>`;
+    });
+    document.getElementById('teacher-cat-top10-body').innerHTML = topHtml || '<tr><td colspan="7">No data</td></tr>';
+    
+    // Display Bottom 10 in class
+    let bottomHtml = '';
+    rankings.slice(-10).reverse().forEach((s, i) => {
+        bottomHtml += `<tr>
+            <td><strong>${i+1}</strong></td>
+            <td>${s.name}</td>
+            <td>${s.admNo}</td>
+            <td><span class="badge bg-danger">${s.average.toFixed(1)}%</span></td>
+            <td>${s.highest}%</td>
+            <td>${s.lowest}%</td>
+            <td>${s.assessments}</td>
+        </tr>`;
+    });
+    document.getElementById('teacher-cat-bottom10-body').innerHTML = bottomHtml || '<tr><td colspan="7">No data</td></tr>';
+    
+    // Display class summary
+    const totalStudents = Object.keys(overallData).length;
+    const totalMarks = Object.values(overallData).reduce((a, s) => a + s.count, 0);
+    const classAverage = totalMarks > 0 ? 
+        Object.values(overallData).reduce((a, s) => a + s.total, 0) / totalMarks : 0;
+    
+    let summaryHtml = `<tr>
+        <td><strong>${teacherClass}</strong></td>
+        <td>${totalStudents}</td>
+        <td>${totalMarks}</td>
+        <td>${classAverage.toFixed(1)}%</td>
+        <td>${rankings[0]?.highest || 0}%</td>
+        <td>${rankings[rankings.length-1]?.lowest || 0}%</td>
+    </tr>`;
+    
+    document.getElementById('teacher-cat-summary-body').innerHTML = summaryHtml;
+}
+
+async function displayTeacherWeekCATAnalytics(weekMarks, weekId, teacherClass) {
+    if (!weekMarks || weekMarks.length === 0) {
+        document.getElementById('teacher-cat-top10-body').innerHTML = '<tr><td colspan="7">No marks for this CAT</td></tr>';
+        document.getElementById('teacher-cat-bottom10-body').innerHTML = '<tr><td colspan="7">No marks for this CAT</td></tr>';
+        document.getElementById('teacher-cat-summary-body').innerHTML = '<tr><td colspan="6">No marks for this CAT</td></tr>';
+        return;
+    }
+    
+    // Build rankings for this week
+    const studentScores = {};
+    weekMarks.forEach(m => {
+        if (!studentScores[m.studentId]) {
+            studentScores[m.studentId] = {
+                name: m.name,
+                admNo: m.admNo,
+                total: 0,
+                count: 0,
+                marks: []
+            };
+        }
+        studentScores[m.studentId].total += m.marks;
+        studentScores[m.studentId].count++;
+        studentScores[m.studentId].marks.push(m.marks);
+    });
+    
+    const rankings = [];
+    for (let id in studentScores) {
+        const s = studentScores[id];
+        rankings.push({
+            name: s.name,
+            admNo: s.admNo,
+            average: s.total / s.count,
+            marks: s.marks
+        });
+    }
+    
+    rankings.sort((a, b) => b.average - a.average);
+    
+    // Top 10 for this week
+    let topHtml = '';
+    rankings.slice(0, 10).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+        topHtml += `<tr>
+            <td><strong>${medal || i+1}</strong></td>
+            <td>${s.name}</td>
+            <td>${s.admNo}</td>
+            <td><span class="badge bg-success">${s.average.toFixed(1)}%</span></td>
+            <td>${Math.max(...s.marks)}%</td>
+            <td>${Math.min(...s.marks)}%</td>
+        </tr>`;
+    });
+    document.getElementById('teacher-cat-top10-body').innerHTML = topHtml;
+    
+    // Bottom 10 for this week
+    let bottomHtml = '';
+    rankings.slice(-10).reverse().forEach((s, i) => {
+        bottomHtml += `<tr>
+            <td><strong>${i+1}</strong></td>
+            <td>${s.name}</td>
+            <td>${s.admNo}</td>
+            <td><span class="badge bg-danger">${s.average.toFixed(1)}%</span></td>
+            <td>${Math.max(...s.marks)}%</td>
+            <td>${Math.min(...s.marks)}%</td>
+        </tr>`;
+    });
+    document.getElementById('teacher-cat-bottom10-body').innerHTML = bottomHtml;
+    
+    // Class summary for this week
+    const weekAverage = weekMarks.reduce((a, m) => a + m.marks, 0) / weekMarks.length;
+    const highest = Math.max(...weekMarks.map(m => m.marks));
+    const lowest = Math.min(...weekMarks.map(m => m.marks));
+    const passCount = weekMarks.filter(m => m.marks >= 50).length;
+    const passRate = (passCount / weekMarks.length * 100).toFixed(1);
+    
+    let summaryHtml = `<tr>
+        <td><strong>${teacherClass}</strong></td>
+        <td>${weekMarks.length}</td>
+        <td>${weekAverage.toFixed(1)}%</td>
+        <td>${highest}%</td>
+        <td>${lowest}%</td>
+        <td>${passRate}%</td>
+    </tr>`;
+    
+    document.getElementById('teacher-cat-summary-body').innerHTML = summaryHtml;
+}
+
+// Make functions globally available
+window.teacherViewCATAnalytics = teacherViewCATAnalytics;
+window.loadTeacherCATAnalytics = loadTeacherCATAnalytics;
 
     // Expose functions globally for onclick handlers
     return {

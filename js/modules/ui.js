@@ -27,7 +27,6 @@ const UIManager = (function() {
             link.classList.remove('active');
         });
     }
-
     function buildAdminSidebar() {
         const sidebar = document.getElementById('sidebarNav');
         sidebar.innerHTML = `
@@ -42,6 +41,16 @@ const UIManager = (function() {
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link" onclick="UIManager.showSection('complete-analytics-section'); initAnalyticsControls(); displayStoredAnalytics()">
+                    <i class="fas fa-chart-pie"></i> Complete Analytics
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" onclick="UIManager.showSection('cat-analytics-section'); loadCATAnalytics()">
+                    <i class="fas fa-calendar-alt"></i> CAT Analysis
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" onclick="UIManager.showSection('students-section'); AdminDashboard.loadStudents()">
                     <i class="fas fa-users"></i> Students
                 </a>
@@ -52,8 +61,9 @@ const UIManager = (function() {
                 </a>
             </li>
         `;
+    
+    
     }
-
     function buildTeacherSidebar() {
         const sidebar = document.getElementById('sidebarNav');
         sidebar.innerHTML = `
@@ -68,8 +78,18 @@ const UIManager = (function() {
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link" onclick="UIManager.showSection('teacher-analytics-section'); teacherViewAnalytics()">
+                    <i class="fas fa-chart-pie"></i> Class Analytics
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" onclick="UIManager.showSection('teacher-cat-analytics-section'); teacherViewCATAnalytics()">
+                    <i class="fas fa-calendar-alt"></i> CAT Analysis
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" onclick="UIManager.showSection('my-class-analysis-section'); TeacherDashboard.loadTeacherWeeksForAnalysis()">
-                    <i class="fas fa-chart-line"></i> Class Analysis
+                    <i class="fas fa-chart-line"></i> Detailed Analysis
                 </a>
             </li>
         `;
